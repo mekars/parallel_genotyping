@@ -1,0 +1,54 @@
+#!/bin/bash 
+all_chroms=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 X Y)
+file_list=$(ls | grep gz$)
+N=8
+open_sem(){
+    mkfifo pipe-$$
+    exec 3<>pipe-$$
+    rm pipe-$$
+    local i=$1
+    for((;i>0;i--)); do
+        printf %s 000 >&3
+    done
+}
+run_with_lock(){
+    local x
+    read -u 3 -n 3 x && ((0==x)) || exit $x
+    (
+     ( $@; )
+    printf '%.3d' $? >&3
+    )&
+}
+
+select_variant_for_chromosom(){
+	
+	WKDIR=$(mkdir $1-sample)	
+	for fn in $file_list
+	do
+	(	
+	java -Xms4G -Xmx8G -jar GenomeAnalysisTK.jar -T SelectVariants -R human_g1k_v37.fasta -V $fn -o $1-sample/$1-$fn -L $1
+	)	
+	done
+}
+
+genotype_gvcfs(){
+	java -Xms4G -Xmx8G -jar GenomeAnalysisTK.jar -T GenotypeGVCFs -R human_g1k_v37.fasta $(ls -d -1 ./$1-sample/* | grep gz$ | sed 's/.*/ -V &/')  -o genotyped_$1.vcf
+}
+
+open_sem $N
+for chr in ${all_chroms[@]}
+do
+	run_with_lock select_variant_for_chromosom $chr	
+done
+wait
+
+open_sem $N
+for chr in ${all_chroms[@]}
+do
+	run_with_lock genotype_gvcfs $chr
+done
+wait
+
+java -Xms32G -Xmx48G -XX:ParallelGCThreads=8 -cp GenomeAnalysisTK.jar org.broadinstitute.gatk.tools.CatVariants -R 1000G_phase3-orig/human_g1k_v37.fasta -V genotyped_1.vcf -V genotyped_2.vcf  -V genotyped_3.vcf  -V genotyped_4.vcf  -V genotyped_5.vcf  -V genotyped_6.vcf  -V genotyped_7.vcf  -V genotyped_8.vcf  -V genotyped_9.vcf  -V genotyped_10.vcf  -V genotyped_11.vcf  -V genotyped_12.vcf  -V genotyped_13.vcf  -V genotyped_14.vcf  -V genotyped_15.vcf  -V genotyped_16.vcf  -V genotyped_17.vcf  -V genotyped_18.vcf -V genotyped_19.vcf  -V genotyped_20.vcf  -V genotyped_21.vcf  -V genotyped_22.vcf  -V genotyped_X.vcf -V genotyped_Y.vcf -out all_exome.vcf --assumeSorted
+
+exit
